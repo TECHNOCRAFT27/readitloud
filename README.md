@@ -1,4 +1,5 @@
 # Text-to-Speech (TTS) for Selected Text
+co-writer by opencode
 
 A script to read selected text aloud using a keyboard shortcut. Supports multiple languages and voices.
 
