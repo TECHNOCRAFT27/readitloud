@@ -8,6 +8,7 @@ fallback) and played through `mpv`; press again to stop.
 live on this machine at `~/.config/omarchy/plugins/readitloud.tts/`.
 
 co-writer by opencode
+![alt text](image.png)
 
 ## Installation
 
