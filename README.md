@@ -22,14 +22,33 @@ omarchy plugin enable readitloud.tts right
 
 ### Dependencies
 
-- `omarchy pkg add mpv wl-paste jq espeak-ng notify-send
-- `edge-tts` runs from a venv at `~/.local/share/tts-venv`:
-  ```bash
-  python -m venv ~/.local/share/tts-venv
-  ~/.local/share/tts-venv/bin/pip install edge-tts
-  ```
-  (the AUR `python-edge-tts` package is abandoned; the venv avoids a dozen
-  python deps in a bare `sudo` install)
+⚠️ **This plugin requires system packages and Python dependencies.**
+
+#### System Packages
+The following packages are required and will be installed:
+- `mpv` — audio playback for TTS output
+- `wl-paste` — clipboard reading on Wayland
+- `jq` — JSON processing for settings
+- `espeak-ng` — fallback offline TTS engine (no network required)
+- `notify-send` — desktop notifications
+
+Install all at once:
+```bash
+omarchy pkg add mpv wl-paste jq espeak-ng notify-send
+```
+
+#### Python Dependencies
+`edge-tts` is installed in an isolated Python venv to avoid system-wide dependency conflicts:
+```bash
+python -m venv ~/.local/share/tts-venv
+~/.local/share/tts-venv/bin/pip install edge-tts
+```
+
+**Why we use a venv instead of `sudo`:**
+- Avoids conflicts with system Python packages
+- Doesn't require elevated privileges for Python packages
+- Makes uninstallation cleaner and safer
+- The AUR `python-edge-tts` package is abandoned, so venv is the recommended approach
 
 ### Keybinding
 
@@ -48,12 +67,15 @@ omarchy plugin remove readitloud.tts
 This removes the plugin from `~/.config/omarchy/plugins/` and its entry in
 `~/.config/omarchy/shell.json`.
 
-To fully clean up leftovers:
+### Complete Cleanup
+
+To fully remove all traces, including dependencies and temporary files:
 
 ```bash
 rm -f ~/.local/bin/ttsctl                 # settings CLI symlink
 # remove the o.bind("ALT + S", ...) line from ~/.config/hypr/bindings.lua
 rm -f /tmp/readitloud-tts.pid /tmp/speaking-status
+rm -rf ~/.local/share/tts-venv            # removes edge-tts and its venv
 ```
 
 ## Usage
@@ -107,13 +129,27 @@ readitloud/
 └── README.md       # this file
 ```
 
-## Security
+## Security & Privacy
 
-This plugin reads your clipboard, synthesizes speech with a network call to
-Microsoft's edge-tts service (or locally with `espeak-ng`), and plays audio via
-`mpv`. `ttsctl set voice ...` values are passed as arguments to `edge-tts` /
-`espeak-ng` — no shell evaluation. Clipboard text is sent to the TTS provider
-as-is; anything you copy can be read aloud.
+### What This Plugin Accesses
+- **Clipboard** (read-only) — only when you press ALT+S
+- **Audio output** — via `mpv` for playback
+- **Network** (optional) — to Microsoft edge-tts service for speech synthesis
+- **Local files** — reads/writes settings to `~/.config/omarchy/shell.json`
+
+### Privacy Options
+- **Offline mode available** — Run `ttsctl set engine espeak-ng` to use entirely offline text-to-speech (no network requests)
+- **No data collection** — This plugin doesn't collect, log, or send usage data beyond the TTS synthesis itself
+- **Clipboard content** — Text you copy is sent to the TTS provider as-is (edge-tts or local espeak-ng). Use offline mode to keep clipboard data local.
+
+### Code Safety
+- `ttsctl set voice ...` values are passed as arguments to `edge-tts` / `espeak-ng` — **no shell evaluation**
+- All clipboard operations use `wl-paste` (safe Wayland clipboard API)
+- No privilege escalation — no `sudo` required after installation
+
+### Open Source & Licensed
+- Full source code: [github.com/TECHNOCRAFT27/readitloud](https://github.com/TECHNOCRAFT27/readitloud)
+- Licensed under **MIT** — review the LICENSE file for full terms
 
 ## Troubleshooting
 
