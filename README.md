@@ -39,6 +39,23 @@ Set in `~/.config/hypr/bindings.lua` (never raw `bind =` lines):
 o.bind("ALT + S", "Read selection aloud", "omarchy-shell shell toggle readitloud.tts")
 ```
 
+## Removal
+
+```bash
+omarchy plugin remove readitloud.tts
+```
+
+This removes the plugin from `~/.config/omarchy/plugins/` and its entry in
+`~/.config/omarchy/shell.json`.
+
+To fully clean up leftovers:
+
+```bash
+rm -f ~/.local/bin/ttsctl                 # settings CLI symlink
+# remove the o.bind("ALT + S", ...) line from ~/.config/hypr/bindings.lua
+rm -f /tmp/readitloud-tts.pid /tmp/speaking-status
+```
+
 ## Usage
 
 1. **Copy text** to the clipboard (select + Ctrl+C, or `wl-copy`)
@@ -86,8 +103,17 @@ readitloud/
 ├── Panel.qml       # Quickshell bar widget + popup (open/close tie to speech)
 ├── speak.sh        # TTS helper: start/stop/status
 ├── ttsctl.sh       # settings CLI → ~/.local/bin/ttsctl
+├── LICENSE         # MIT
 └── README.md       # this file
 ```
+
+## Security
+
+This plugin reads your clipboard, synthesizes speech with a network call to
+Microsoft's edge-tts service (or locally with `espeak-ng`), and plays audio via
+`mpv`. `ttsctl set voice ...` values are passed as arguments to `edge-tts` /
+`espeak-ng` — no shell evaluation. Clipboard text is sent to the TTS provider
+as-is; anything you copy can be read aloud.
 
 ## Troubleshooting
 
