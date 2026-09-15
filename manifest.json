@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "readitloud.tts",
+  "name": "Read It Loud",
+  "version": "0.1.0",
+  "author": "pramillay",
+  "description": "Read clipboard text aloud with a keyboard shortcut or bar click",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "TTS",
+    "description": "Read selected text aloud via edge-tts or espeak-ng",
+    "category": "Accessibility",
+    "aliases": ["readitloud", "tts"],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "engine": "edge-tts",
+      "voice": "en-IN-NeerjaExpressiveNeural",
+      "rate": "-20%",
+      "pitch": "+0Hz",
+      "volume": "+0%"
+    }
+  }
+}

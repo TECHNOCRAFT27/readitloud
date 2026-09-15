@@ -1,144 +1,112 @@
-# Text-to-Speech (TTS) for Selected Text
+# readitloud
+
+Read clipboard text aloud on Wayland/Hyprland — press **ALT+S** (or click the TTS
+bar icon) → clipboard selection is synthesized with `edge-tts` (or `espeak-ng`
+fallback) and played through `mpv`; press again to stop.
+
+**readitloud is an Omarchy plugin** (`readitloud.tts`, a bar widget) developed
+live on this machine at `~/.config/omarchy/plugins/readitloud.tts/`.
+
 co-writer by opencode
 
-A script to read selected text aloud using a keyboard shortcut. Supports multiple languages and voices.
-
-## Requirements
-
-- Linux with Hyprland (Wayland)
-- `jq` - for config parsing
-- `wl-paste` - for clipboard access
-- `mpv` - for audio playback
-- Python 3.8+ (for edge-tts)
-
-## Quick Install
+## Installation
 
 ```bash
-# Clone or download this repo
-git clone https://github.com/your-repo/speak-toggle.git ~/speak-tts
+# add the plugin (run from where this repo is cloned)
+omarchy plugin add /path/to/readitloud --enable
 
-# Run installer
-cd ~/speak-tts
-chmod +x install.sh
-./install.sh
+# or, if the plugin dir is already in place:
+omarchy plugin enable readitloud.tts right
 ```
 
-Or manual install:
+### Dependencies
 
-```bash
-# 1. Install dependencies
-sudo pacman -S jq mpv python
+- `omarchy pkg add mpv wl-paste jq espeak-ng notify-send
+- `edge-tts` runs from a venv at `~/.local/share/tts-venv`:
+  ```bash
+  python -m venv ~/.local/share/tts-venv
+  ~/.local/share/tts-venv/bin/pip install edge-tts
+  ```
+  (the AUR `python-edge-tts` package is abandoned; the venv avoids a dozen
+  python deps in a bare `sudo` install)
 
-# 2. Setup TTS engine
-python -m venv ~/.local/share/tts-venv
-~/.local/share/tts-venv/bin/pip install edge-tts
+### Keybinding
 
-# 3. Copy script
-cp speak-toggle.sh ~/.local/bin/speak-toggle
-chmod +x ~/.local/bin/speak-toggle
+Set in `~/.config/hypr/bindings.lua` (never raw `bind =` lines):
 
-# 4. Add keybinding (edit ~/.config/hypr/bindings.conf)
-bind = mod1, S, exec, ~/.local/bin/speak-toggle
-
-# 5. Reload Hyprland
-hyprctl reload
+```lua
+o.bind("ALT + S", "Read selection aloud", "omarchy-shell shell toggle readitloud.tts")
 ```
 
 ## Usage
 
-1. **Copy text** to clipboard (select text + Ctrl+C)
-2. **Press Alt+S** to start speaking
-3. **Press Alt+S again** to stop
+1. **Copy text** to the clipboard (select + Ctrl+C, or `wl-copy`)
+2. **Press ALT+S** (or left-click the TTS icon) — starts speaking
+3. **Press ALT+S again** (or middle-click) — stops
+4. **Right-click** the icon — status/settings popup; **Settings…** opens `ttsctl`
 
-## Configuration
+## Settings
 
-Edit `config.json`:
+**`ttsctl`** is the settings/control CLI (symlinked to `~/.local/bin/ttsctl`):
 
-```json
-{
-  "voice": {
-    "engine": "edge-tts",
-    "voice": "en-IN-NeerjaExpressiveNeural",
-    "rate": "-10%",
-    "pitch": "+0Hz",
-    "volume": "+0%"
-  },
-  "behavior": {
-    "stop_on_repress": true,
-    "show_notifications": true
-  },
-  "notifications": {
-    "on_start": "🔊 Speaking",
-    "on_stop": "🔇 Stopped",
-    "on_done": "✅ Done"
-  }
-}
+```
+ttsctl               interactive menu
+ttsctl show          current settings
+ttsctl set <key> <val>   set voice, rate, pitch, volume or engine
+ttsctl voices        list available edge-tts voices
+ttsctl speak         speak clipboard now (manual test)
+ttsctl stop          stop speaking
+ttsctl status        is speaking?
 ```
 
-### Available Voices
+Settings are written to the `readitloud.tts` entry in
+`~/.config/omarchy/shell.json` and hot-reload into the widget.
 
-| Voice | Language/Style |
-|-------|----------------|
-| `en-IN-NeerjaExpressiveNeural` | Indian female (expressive) |
-| `en-IN-NeerjaNeural` | Indian female |
-| `en-US-AnaNeural` | US teen/kid |
-| `en-US-EmmaNeural` | US adult female |
-| `en-GB-MaisieNeural` | UK young female |
-| `en-GB-SoniaNeural` | UK adult female |
+| Setting | Example values |
+|---------|----------------|
+| `voice` | `en-IN-NeerjaExpressiveNeural`, `en-US-EmmaNeural` |
+| `rate`  | `+0%`, `-10%`, `-20%` (slower) |
+| `pitch` | `+0Hz`, `-5Hz` |
+| `volume`| `+0%`, `+10%` |
+| `engine`| `edge-tts`, `espeak-ng` |
 
-List all voices:
-```bash
-~/.local/share/tts-venv/bin/edge-tts --list-voices | grep Female
-```
-
-### Speed Options
-
-| Rate | Speed |
-|------|-------|
-| `-20%` | Very slow |
-| `-10%` | Slower (default) |
-| `+0%` | Normal |
-| `+10%` | Faster |
+List all voices: `ttsctl voices` (or
+`~/.local/share/tts-venv/bin/edge-tts --list-voices | grep Female`).
 
 ## File Structure
 
+This repo **is** the plugin source; install it by linking (or `omarchy plugin
+add`) this folder into `~/.config/omarchy/plugins/` (the live copy lives at
+`~/.config/omarchy/plugins/readitloud.tts/`).
+
 ```
-speak-toggle/
-├── speak-toggle.sh   # Main script
-├── config.json       # Voice settings
-├── install.sh        # Auto-installer
-└── README.md         # This file
+readitloud/
+├── manifest.json   # plugin manifest (kind: bar-widget, settings defaults)
+├── Panel.qml       # Quickshell bar widget + popup (open/close tie to speech)
+├── speak.sh        # TTS helper: start/stop/status
+├── ttsctl.sh       # settings CLI → ~/.local/bin/ttsctl
+└── README.md       # this file
 ```
 
 ## Troubleshooting
 
-**Keybinding not working?**
+**ALT+S does nothing** (widget failed to load):
 ```bash
-# Check if bound
-hyprctl binds | grep speak
-
-# Reload config
-hyprctl reload
+journalctl --user -u omarchy-shell -f | rg -i "readitloud|error|failed"
+# e.g. "Cannot assign to non-existent property" → QML error → rm -rf ~/.cache/quickshell/qmlcache/* && omarchy restart shell
 ```
 
-**No audio?**
+**Stale behavior after editing Panel.qml**:
 ```bash
-# Test manually
+rm -rf ~/.cache/quickshell/qmlcache/*
+omarchy restart shell
+```
+
+**No audio / no speech**: test manually:
+```bash
 ~/.local/share/tts-venv/bin/edge-tts -v en-IN-NeerjaExpressiveNeural -t "test" --write-media /tmp/test.mp3
 mpv /tmp/test.mp3
-```
-
-**Check dependencies:**
-```bash
 which jq mpv wl-paste
-```
-
-## Uninstall
-
-```bash
-# Remove keybinding from ~/.config/hypr/bindings.conf
-# Remove files
-rm -rf ~/speak-tts ~/.local/bin/speak-toggle ~/.local/share/tts-venv
 ```
 
 ## License
