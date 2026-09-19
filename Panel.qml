@@ -78,7 +78,7 @@ Panel {
         root.positionSec = parseFloat(fields[2]) || 0
         root.durationSec = parseFloat(fields[3]) || 0
         root.synthesizing = root.durationSec <= 0
-      } else if (root.ttsProcess.running) {
+      } else if (ttsProcess.running) {
         root.synthesizing = true
       }
     }
@@ -175,6 +175,13 @@ Panel {
       visible: root.speaking && !root.synthesizing
       width: Math.max(parent.height, parent.width * root.progressFraction)
       Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+
+      SequentialAnimation on opacity {
+        running: root.speaking && !root.synthesizing
+        loops: Animation.Infinite
+        NumberAnimation { to: 0.45; duration: 700; easing.type: Easing.InOutSine }
+        NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
+      }
     }
 
     Rectangle {
@@ -195,13 +202,6 @@ Panel {
     easing.type: Easing.InOutCubic
     loops: Animation.Infinite
     running: root.synthesizing
-  }
-
-  SequentialAnimation on barFill.opacity {
-    running: root.speaking && !root.synthesizing
-    loops: Animation.Infinite
-    NumberAnimation { to: 0.45; duration: 700; easing.type: Easing.InOutSine }
-    NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
   }
 
   KeyboardPanel {
