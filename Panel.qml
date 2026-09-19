@@ -23,6 +23,25 @@ Panel {
 
   readonly property string icon: "󰗊"
   property bool speaking: false
+  property bool synthesizing: false
+  property real progressFraction: 0
+  property real positionSec: 0
+  property real durationSec: 0
+  property real synthShimmer: 0
+
+  readonly property string statusText:
+    root.speaking ? (root.synthesizing ? "Synthesizing" : "Playing") : "Ready"
+  readonly property string timeText:
+    root.durationSec > 0
+      ? root.formatTime(Math.round(root.positionSec)) + " / " + root.formatTime(Math.round(root.durationSec))
+      : ""
+
+  function formatTime(totalSeconds) {
+    if (isNaN(totalSeconds) || totalSeconds < 0) totalSeconds = 0
+    var m = Math.floor(totalSeconds / 60)
+    var s = totalSeconds % 60
+    return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s
+  }
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(fg, 1.4)
@@ -35,13 +54,34 @@ Panel {
   Process {
     id: ttsProcess
     command: ["bash", root.helperPath, "start"]
-    onExited: function(exitCode) { root.speaking = false }
+    onExited: function(exitCode) {
+      root.speaking = false
+      root.synthesizing = false
+      root.progressFraction = 0
+      root.positionSec = 0
+      root.durationSec = 0
+    }
   }
 
   Process {
-    id: statusProcess
-    command: ["bash", root.helperPath, "status"]
-    onExited: function(exitCode) { root.speaking = exitCode === 0 }
+    id: progressProcess
+    command: ["bash", root.helperPath, "progress"]
+    stdout: StdioCollector {
+      id: progressOut
+      waitForEnd: true
+    }
+    onExited: function() {
+      var fields = String(progressOut.text).trim().split(" ")
+      if (fields.length < 4) return
+      if (fields[0] === "1") {
+        root.progressFraction = parseFloat(fields[1]) || 0
+        root.positionSec = parseFloat(fields[2]) || 0
+        root.durationSec = parseFloat(fields[3]) || 0
+        root.synthesizing = root.durationSec <= 0
+      } else if (root.ttsProcess.running) {
+        root.synthesizing = true
+      }
+    }
   }
 
   Timer {
@@ -49,7 +89,7 @@ Panel {
     repeat: true
     running: true
     triggeredOnStart: false
-    onTriggered: statusProcess.running = true
+    onTriggered: progressProcess.running = true
   }
 
   function startSpeech() {
@@ -59,13 +99,21 @@ Panel {
       "--rate", root.rate, "--pitch", root.pitch, "--volume", root.volume]
     ttsProcess.running = true
     root.speaking = true
+    root.synthesizing = true
+    root.progressFraction = 0
+    root.positionSec = 0
+    root.durationSec = 0
   }
 
   function stopSpeech() {
     ttsProcess.running = false  // kills an in-flight speak.sh start (mid-synthesis)
+    root.speaking = false
+    root.synthesizing = false
+    root.progressFraction = 0
+    root.positionSec = 0
+    root.durationSec = 0
     stopProcess.command = ["bash", root.helperPath, "stop"]
     stopProcess.running = true
-    root.speaking = false
   }
 
   Process {
@@ -96,12 +144,64 @@ Panel {
     bar: root.bar
     text: root.icon
     active: root.speaking
-    tooltipText: root.speaking ? "Speaking — click to stop" : "readitloud — click to read clipboard aloud"
+    tooltipText: root.speaking
+      ? "Speaking — " + Math.round(root.progressFraction * 100) + "%" + (root.durationSec > 0 ? " (" + root.timeText + ")" : "")
+      : "readitloud — click to read clipboard aloud"
     onPressed: function(b) {
       if (b === Qt.RightButton) root.controller.show()
       else if (b === Qt.MiddleButton) root.stopSpeech()
       else root.toggleSpeech()
     }
+  }
+
+  // Live status strip across the bottom of the bar slot: a filled progress
+  // bar while playing, an indeterminate sweep while synthesizing.
+  Rectangle {
+    id: barTrack
+    visible: root.speaking
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: 2
+    color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.15)
+
+    Rectangle {
+      id: barFill
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      height: parent.height
+      radius: parent.height / 2
+      color: root.fg
+      visible: root.speaking && !root.synthesizing
+      width: Math.max(parent.height, parent.width * root.progressFraction)
+      Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+    }
+
+    Rectangle {
+      id: barShimmer
+      width: 26
+      height: parent.height
+      radius: parent.height / 2
+      color: root.fg
+      visible: root.speaking && root.synthesizing
+      x: -width + root.synthShimmer * (barTrack.width + width)
+    }
+  }
+
+  NumberAnimation on synthShimmer {
+    from: 0
+    to: 1
+    duration: 1200
+    easing.type: Easing.InOutCubic
+    loops: Animation.Infinite
+    running: root.synthesizing
+  }
+
+  SequentialAnimation on barFill.opacity {
+    running: root.speaking && !root.synthesizing
+    loops: Animation.Infinite
+    NumberAnimation { to: 0.45; duration: 700; easing.type: Easing.InOutSine }
+    NumberAnimation { to: 1.0; duration: 700; easing.type: Easing.InOutSine }
   }
 
   KeyboardPanel {
@@ -150,7 +250,7 @@ Panel {
             spacing: Style.space(2)
 
             Text {
-              text: root.speaking ? "Speaking" : "Ready"
+              text: root.statusText
               color: root.fg
               font.family: root.ff
               font.pixelSize: Style.font.title
@@ -163,6 +263,53 @@ Panel {
               font.family: root.ff
               font.pixelSize: Style.font.caption
             }
+          }
+
+          Text {
+            id: timeLabel
+            visible: root.speaking && root.durationSec > 0
+            text: root.timeText
+            color: root.fg
+            font.family: root.ff
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
+        Item {
+          width: parent.width
+          implicitHeight: Style.space(8)
+          visible: root.speaking
+
+          Rectangle {
+            id: progTrack
+            anchors.fill: parent
+            radius: height / 2
+            color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12)
+          }
+
+          Rectangle {
+            id: progFill
+            anchors.left: progTrack.left
+            anchors.verticalCenter: progTrack.verticalCenter
+            height: progTrack.height
+            radius: progTrack.radius
+            color: root.fg
+            visible: !root.synthesizing
+            width: Math.max(progTrack.height, progTrack.width * root.progressFraction)
+            Behavior on width { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+          }
+
+          Rectangle {
+            id: progShimmer
+            width: Style.space(28)
+            height: progTrack.height
+            radius: progTrack.radius
+            color: root.fg
+            visible: root.synthesizing
+            x: -width + root.synthShimmer * (progTrack.width + width)
           }
         }
 
