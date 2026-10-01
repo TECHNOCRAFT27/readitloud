@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "readitloud.tts",
   "name": "Read It Loud",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "pramillay",
   "description": "Read clipboard text aloud with a keyboard shortcut or bar click",
   "kinds": ["bar-widget"],
