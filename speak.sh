@@ -10,11 +10,12 @@
 # fallback), plays through mpv. Toggle state tracked in a PID file.
 set -o pipefail
 
-PIDFILE="/tmp/readitloud-tts.pid"
-AUDIO_MP3="/tmp/readitloud-tts.mp3"
-AUDIO_WAV="/tmp/readitloud-tts.wav"
+STATE_DIR="${HOME}/.local/state/readitloud"
+PIDFILE="${STATE_DIR}/readitloud-tts.pid"
+AUDIO_MP3="${STATE_DIR}/readitloud-tts.mp3"
+AUDIO_WAV="${STATE_DIR}/readitloud-tts.wav"
 WAYBAR_FILE="/tmp/speaking-status"
-MPV_SOCK="/tmp/readitloud-tts.sock"
+MPV_SOCK="${STATE_DIR}/readitloud-tts.sock"
 EDGE_TTS_BIN="${HOME}/.local/share/tts-venv/bin/edge-tts"
 
 # Defaults
@@ -38,8 +39,25 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Ensure state directory exists with secure permissions
+ensure_state_dir() {
+  mkdir -p "$STATE_DIR" 2>/dev/null
+  chmod 0700 "$STATE_DIR" 2>/dev/null
+}
+
 is_speaking() {
-  [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+  [[ -f "$PIDFILE" ]] || return 1
+  local pid
+  pid=$(cat "$PIDFILE" 2>/dev/null)
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  pid_is_ours "$pid" && kill -0 "$pid" 2>/dev/null
+}
+
+pid_is_ours() {
+  local pid="$1"
+  local cmdline
+  cmdline=$(cat "/proc/$pid/cmdline" 2>/dev/null | tr '\0' ' ')
+  [[ "$cmdline" =~ (mpv|edge-tts|espeak-ng|speak.sh) ]]
 }
 
 # notify-send can block when the notification daemon is busy/unreachable;
@@ -63,7 +81,13 @@ case "$cmd" in
     ;;
 
   stop)
-    kill "$(cat "$PIDFILE")" 2>/dev/null
+    local pid
+    if [[ -f "$PIDFILE" ]]; then
+      pid=$(cat "$PIDFILE" 2>/dev/null)
+      if [[ "$pid" =~ ^[0-9]+$ ]] && pid_is_ours "$pid"; then
+        kill "$pid" 2>/dev/null
+      fi
+    fi
     pkill -f "mpv.*readitloud-tts" 2>/dev/null
     pkill -f "[s]peak.sh start" 2>/dev/null
     pkill -f "tts-venv/bin/edge-tts" 2>/dev/null
@@ -75,9 +99,15 @@ case "$cmd" in
     ;;
 
   start)
+    ensure_state_dir
+
     # If already speaking, stop first (toggle behavior)
     if is_speaking; then
-      kill "$(cat "$PIDFILE")" 2>/dev/null
+      local pid
+      pid=$(cat "$PIDFILE" 2>/dev/null)
+      if [[ "$pid" =~ ^[0-9]+$ ]] && pid_is_ours "$pid"; then
+        kill "$pid" 2>/dev/null
+      fi
       pkill -f "mpv.*readitloud-tts" 2>/dev/null
       cleanup
       notify "🔇 Stopped" "Text-to-speech stopped"
@@ -94,14 +124,21 @@ case "$cmd" in
     notify "🔊 Speaking" "Reading selected text..."
 
     if [[ "$ENGINE" == "edge-tts" ]] && [[ -x "$EDGE_TTS_BIN" ]]; then
-      "$EDGE_TTS_BIN" -v "$VOICE" -t "$TEXT" \
+      local text_file
+      text_file=$(mktemp --tmpdir readitloud.XXXXXX)
+      chmod 0600 "$text_file"
+      printf '%s' "$TEXT" > "$text_file"
+      
+      "$EDGE_TTS_BIN" -v "$VOICE" -f "$text_file" \
         --rate "$RATE" --pitch "$PITCH" --volume "$VOLUME" \
         --write-media "$AUDIO_MP3" >/dev/null 2>&1
+      rm -f "$text_file"
+      
       rm -f "$MPV_SOCK"
       mpv "$AUDIO_MP3" --no-video --really-quiet \
         --input-ipc-server="$MPV_SOCK" &
     else
-      espeak-ng -v en-us -p 75 -s 110 -w "$AUDIO_WAV" "$TEXT" 2>/dev/null
+      echo "$TEXT" | espeak-ng -v en-us -p 75 -s 110 -w "$AUDIO_WAV" --stdin 2>/dev/null
       aplay "$AUDIO_WAV" >/dev/null 2>&1 &
     fi
 
