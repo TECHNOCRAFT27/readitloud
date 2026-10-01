@@ -5,6 +5,7 @@
 #   ttsctl show             Print current settings
 #   ttsctl set <key> <val>  Change a setting (voice, rate, pitch, volume, engine)
 #   ttsctl voices           List available edge-tts voices
+#   ttsctl doctor           Report missing dependencies (read-only)
 #   ttsctl speak            Speak clipboard text (manual test)
 #   ttsctl stop             Stop speaking
 #   ttsctl status           Check if speaking
@@ -12,7 +13,9 @@ set -o pipefail
 
 CONFIG="$HOME/.config/omarchy/shell.json"
 PLUGIN_ID="readitloud.tts"
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SPEAK_SH="$HOME/.config/omarchy/plugins/readitloud.tts/speak.sh"
+[[ -f "$SPEAK_SH" ]] || SPEAK_SH="$SELF_DIR/speak.sh"
 
 # ---- ANSI styling ----
 R='\e[0m'; B='\e[1m'; D='\e[2m'; I='\e[3m'
@@ -174,7 +177,7 @@ menu() {
     printf '%b\n' "    $(c "${B}${CK}1${R}") Voice      $(c "${B}${CK}2${R}") Rate       $(c "${B}${CK}3${R}") Pitch"
     printf '%b\n' "    $(c "${B}${CK}4${R}") Volume     $(c "${B}${CK}5${R}") Engine     $(c "${B}${CK}6${R}") List voices"
     printf '%b\n' "    $(c "${B}${CK}7${R}") Speak now  $(c "${B}${CK}8${R}") Stop       $(c "${B}${CK}9${R}") Status"
-    printf '%b\n' "    $(c "${B}${CK}q${R}") Quit"
+    printf '%b\n' "    $(c "${B}${CK}d${R}") Doctor    $(c "${B}${CK}q${R}") Quit"
     echo ""
     read -rp "$(c "${CG}${B}  Choose > ${R}")" choice
     case "$choice" in
@@ -187,6 +190,7 @@ menu() {
       7)  speak_now;;
       8)  if "$SPEAK_SH" stop >/dev/null 2>&1; then printf '%b\n' "$(ok '✓') $(val 'Stopped')"; else printf '%b\n' "$(dim 'not speaking')"; fi;;
       9)  if "$SPEAK_SH" status >/dev/null 2>&1; then printf '%b\n' "$(ok '♪ Speaking now')"; else printf '%b\n' "$(dim '♪ Idle')"; fi;;
+      d|D) doctor;;
       q|Q) clear; break;;
       *)  printf '%b\n' "$(bad '✗') $(warn 'Unknown option')";;
     esac
@@ -219,8 +223,29 @@ list_voices() {
   printf '%b\n' "       $(dim 'e.g.') ttsctl set voice $(val 'en-US-EmmaNeural')"
 }
 
+# Read-only dependency report. Installs nothing and never needs privileges.
+doctor() {
+  local engine report rc
+  engine=$(get_setting engine)
+  printf '%b\n' "$(dim "readitloud doctor · engine: ${engine:-edge-tts}")"
+  printf '%b\n' ""
+  report=$(bash "$SPEAK_SH" check --engine "${engine:-edge-tts}" 2>&1); rc=$?
+  if (( rc == 0 )); then
+    printf '%b\n' "$(ok '✓') $report"
+  else
+    printf '%b\n' "$(warn '⚠') $report"
+    printf '%b\n' ""
+    printf '%b\n' "$(dim 'See the Manual setup section of the plugin README.')"
+  fi
+  return $rc
+}
+
 speak_now() {
   local text
+  if ! doctor >/dev/null; then
+    doctor
+    return 1
+  fi
   text=$(wl-paste 2>/dev/null)
   if [[ -z "$text" ]]; then
     printf '%b\n' "$(bad '✗') Clipboard is empty — nothing to speak."
@@ -276,6 +301,7 @@ case "${1:-menu}" in
     printf '%b\n' "$(ok '✓') $2 = $(val "$(get_setting "$2")")"
     ;;
   voices)   list_voices;;
+  doctor)   doctor;;
   speak)    speak_now;;
   stop)     if "$SPEAK_SH" stop >/dev/null 2>&1; then printf '%b\n' "$(ok '✓') $(val 'Stopped')"; else printf '%b\n' "$(dim 'not speaking')"; fi;;
   status)   if "$SPEAK_SH" status >/dev/null 2>&1; then printf '%b\n' "$(ok '♪ Speaking')"; else printf '%b\n' "$(dim '♪ Idle')"; fi;;
@@ -283,8 +309,9 @@ case "${1:-menu}" in
     if [[ "${1:-menu}" == "menu" ]] && [[ -t 0 ]]; then
       menu
     else
-      printf '%b\n' "$(key 'usage:') ttsctl [show|set|voices|speak|stop|status]"
+      printf '%b\n' "$(key 'usage:') ttsctl [show|set|voices|doctor|speak|stop|status]"
       printf '%b\n' "       ttsctl            $(dim 'Interactive settings menu')"
+      printf '%b\n' "       ttsctl doctor     $(dim 'Report missing dependencies (read-only)')"
     fi
     ;;
   *)        printf '%b\n' "$(bad 'unknown command:') $1" >&2; exit 1;;

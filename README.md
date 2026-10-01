@@ -20,36 +20,6 @@ omarchy plugin add /path/to/readitloud --enable
 omarchy plugin enable readitloud.tts right
 ```
 
-### Dependencies
-
-⚠️ **This plugin requires system packages and Python dependencies.**
-
-#### System Packages
-The following packages are required and will be installed:
-- `mpv` — audio playback for TTS output
-- `wl-paste` — clipboard reading on Wayland
-- `jq` — JSON processing for settings
-- `espeak-ng` — fallback offline TTS engine (no network required)
-- `notify-send` — desktop notifications
-
-Install all at once:
-```bash
-omarchy pkg add mpv wl-paste jq espeak-ng notify-send
-```
-
-#### Python Dependencies
-`edge-tts` is installed in an isolated Python venv to avoid system-wide dependency conflicts:
-```bash
-python -m venv ~/.local/share/tts-venv
-~/.local/share/tts-venv/bin/pip install edge-tts
-```
-
-**Why we use a venv instead of `sudo`:**
-- Avoids conflicts with system Python packages
-- Doesn't require elevated privileges for Python packages
-- Makes uninstallation cleaner and safer
-- The AUR `python-edge-tts` package is abandoned, so venv is the recommended approach
-
 ### Keybinding
 
 Set in `~/.config/hypr/bindings.lua` (never raw `bind =` lines):
@@ -57,6 +27,96 @@ Set in `~/.config/hypr/bindings.lua` (never raw `bind =` lines):
 ```lua
 o.bind("ALT + S", "Read selection aloud", "omarchy-shell shell toggle readitloud.tts")
 ```
+
+## Manual setup
+
+**This plugin requires manual setup.** It ships no speech engine and installs
+nothing on your behalf: no `sudo`, no `pkexec`, no package manager invocation,
+not even a "would you like to install this?" prompt. You install the
+dependencies yourself with the commands below, then verify with
+`ttsctl doctor`.
+
+If a dependency is missing the plugin degrades instead of failing silently:
+the bar widget popup shows **Setup required** with what is missing, ALT+S
+refuses with a notification, and `ttsctl doctor` prints the full report with
+the install command for your distribution.
+
+```bash
+ttsctl doctor   # read-only: reports what is missing, installs nothing
+```
+
+### Required system packages
+
+| Package | Why |
+|---------|-----|
+| `wl-paste` | reads the Wayland clipboard |
+| `mpv` | plays the synthesized audio (both engines) |
+| `espeak-ng` | offline speech engine — required for `engine: espeak-ng` |
+
+`jq`, `socat` and `libnotify` (`notify-send`) are optional: they add the
+progress bar and desktop notifications, and are listed as "optional, not
+installed" by `ttsctl doctor` when absent.
+
+### Install commands
+
+Pick your distribution. Run these yourself; the plugin never runs them.
+
+**Omarchy / Arch**
+```bash
+omarchy pkg add wl-paste mpv espeak-ng        # honours passwordless sudo
+omarchy pkg add jq socat libnotify             # optional extras
+```
+
+**Debian / Ubuntu**
+```bash
+sudo apt install wl-clipboard mpv espeak-ng
+sudo apt install jq socat libnotify-bin        # optional extras
+```
+
+**Fedora**
+```bash
+sudo dnf install wl-clipboard mpv espeak-ng
+sudo dnf install jq socat libnotify            # optional extras
+```
+
+**NixOS**
+```bash
+programs.wl-clipboard.enable = true;
+programs.mpv.enable = true;
+programs.espeak-ng.enable = true;
+```
+
+### Online engine (optional): `edge-tts`
+
+The default engine is Microsoft Edge's online TTS, which needs a Python
+package. It is installed into a **user-owned virtual environment**, so no root
+is involved and it cannot conflict with system Python:
+
+```bash
+python -m venv ~/.local/share/tts-venv
+~/.local/share/tts-venv/bin/pip install edge-tts
+```
+
+Why a venv rather than a system or AUR install:
+
+- no elevated privileges needed
+- no conflict with system Python packages
+- removal is `rm -rf ~/.local/share/tts-venv`
+- the AUR `python-edge-tts` package is abandoned, so the venv is the
+  maintained route
+
+Without it the widget still works — see offline mode below.
+
+### Offline mode
+
+`espeak-ng` needs no network and no Python at all:
+
+```bash
+ttsctl set engine espeak-ng
+```
+
+`rate`, `pitch` and `volume` are translated onto espeak-ng's own scales, so
+the settings still apply offline.
 
 ## Removal
 
@@ -74,7 +134,8 @@ To fully remove all traces, including dependencies and temporary files:
 ```bash
 rm -f ~/.local/bin/ttsctl                 # settings CLI symlink
 # remove the o.bind("ALT + S", ...) line from ~/.config/hypr/bindings.lua
-rm -f /tmp/readitloud-tts.pid /tmp/speaking-status
+rm -rf ~/.local/state/readitloud          # PID file, audio, IPC socket, temp text
+rm -f /tmp/speaking-status                # status marker for external bars
 rm -rf ~/.local/share/tts-venv            # removes edge-tts and its venv
 ```
 
@@ -94,6 +155,7 @@ ttsctl               interactive menu
 ttsctl show          current settings
 ttsctl set <key> <val>   set voice, rate, pitch, volume or engine
 ttsctl voices        list available edge-tts voices
+ttsctl doctor        report missing dependencies (read-only)
 ttsctl speak         speak clipboard now (manual test)
 ttsctl stop          stop speaking
 ttsctl status        is speaking?
@@ -123,9 +185,10 @@ add`) this folder into `~/.config/omarchy/plugins/` (the live copy lives at
 readitloud/
 ├── manifest.json   # plugin manifest (kind: bar-widget, settings defaults)
 ├── Panel.qml       # Quickshell bar widget + popup (open/close tie to speech)
-├── speak.sh        # TTS helper: start/stop/status
+├── speak.sh        # TTS helper: start/stop/status/progress/check
 ├── ttsctl.sh       # settings CLI → ~/.local/bin/ttsctl
 ├── LICENSE         # MIT
+├── SECURITY.md     # capabilities and dependency posture
 └── README.md       # this file
 ```
 
@@ -136,6 +199,17 @@ readitloud/
 - **Audio output** — via `mpv` for playback
 - **Network** (optional) — to Microsoft edge-tts service for speech synthesis
 - **Local files** — reads/writes settings to `~/.config/omarchy/shell.json`
+
+### Dependency handling
+- **Nothing is installed automatically** — no `sudo`, no `pkexec`, no package
+  manager invocation, no install prompts. See [Manual setup](#manual-setup).
+- **Python dependencies go in a user-owned venv** (`~/.local/share/tts-venv`) —
+  never a system or root Python install.
+- **Missing dependencies are reported, not worked around** — `ttsctl doctor`
+  and the widget's Setup required state name what is missing and print the
+  install command for your distribution.
+- **Validation only reads** — `speak.sh check` and `ttsctl doctor` inspect the
+  environment and print; they write nothing outside the plugin's own temp files.
 
 ### Privacy Options
 - **Offline mode available** — Run `ttsctl set engine espeak-ng` to use entirely offline text-to-speech (no network requests)
@@ -165,12 +239,20 @@ rm -rf ~/.cache/quickshell/qmlcache/*
 omarchy restart shell
 ```
 
-**No audio / no speech**: test manually:
+**No audio / no speech**: start with the dependency report
+```bash
+ttsctl doctor
+```
+then test the pieces manually:
 ```bash
 ~/.local/share/tts-venv/bin/edge-tts -v en-IN-NeerjaExpressiveNeural -t "test" --write-media /tmp/test.mp3
 mpv /tmp/test.mp3
 which jq mpv wl-paste
 ```
+
+**"Setup required" in the popup**: `ttsctl doctor` lists what is missing;
+install it yourself with the command it prints (see
+[Manual setup](#manual-setup)).
 
 ## License
 

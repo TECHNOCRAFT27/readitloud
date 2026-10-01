@@ -29,8 +29,17 @@ Panel {
   property real durationSec: 0
   property real synthShimmer: 0
 
+  // Dependency state, from `speak.sh check` (exit 1 = manual setup needed).
+  // The plugin never installs anything itself: it only refuses to be a silent
+  // no-op and points at the README's Manual setup section.
+  property bool depsChecked: false
+  property bool depsReady: true
+  property string depsSummary: ""
+
   readonly property string statusText:
-    root.speaking ? (root.synthesizing ? "Synthesizing" : "Playing") : "Ready"
+    root.depsChecked && !root.depsReady
+      ? "Setup required"
+      : root.speaking ? (root.synthesizing ? "Synthesizing" : "Playing") : "Ready"
   readonly property string timeText:
     root.durationSec > 0
       ? root.formatTime(Math.round(root.positionSec)) + " / " + root.formatTime(Math.round(root.durationSec))
@@ -63,6 +72,25 @@ Panel {
     }
   }
 
+  // `check` exits 1 when a dependency is missing. Read the report off stdout
+  // so the popup can name what is missing instead of just failing to speak.
+  Process {
+    id: checkProcess
+    command: ["bash", root.helperPath, "check", "--engine", root.engine]
+    stdout: StdioCollector {
+      id: checkOut
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      var lines = String(checkOut.text).trim().split("\n")
+      root.depsChecked = true
+      root.depsReady = exitCode === 0
+      root.depsSummary = lines.join(" · ")
+    }
+  }
+
+  Component.onCompleted: checkProcess.running = true
+
   Process {
     id: progressProcess
     command: ["bash", root.helperPath, "progress"]
@@ -94,6 +122,12 @@ Panel {
 
   function startSpeech() {
     if (ttsProcess.running) return
+    if (root.depsChecked && !root.depsReady) {
+      // speak.sh would refuse anyway; surface it in the popup instead of a
+      // bare "nothing happened" on ALT+S.
+      root.controller.show()
+      return
+    }
     ttsProcess.command = ["bash", root.helperPath, "start",
       "--engine", root.engine, "--voice", root.voice,
       "--rate", root.rate, "--pitch", root.pitch, "--volume", root.volume]
@@ -258,10 +292,14 @@ Panel {
             }
 
             Text {
-              text: root.speaking ? "Click to stop" : "ALT+S or click to read"
+              text: root.depsChecked && !root.depsReady
+                ? "Run ttsctl doctor — see Manual setup"
+                : root.speaking ? "Click to stop" : "ALT+S or click to read"
               color: Qt.darker(root.fg, 1.4)
               font.family: root.ff
               font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              width: parent.width
             }
           }
 
@@ -313,6 +351,29 @@ Panel {
           }
         }
 
+        // Setup state: shown instead of settings detail when a dependency is
+        // missing. Names the gap; never installs anything.
+        Rectangle {
+          width: parent.width
+          visible: root.depsChecked && !root.depsReady
+          implicitHeight: setupText.implicitHeight + Style.space(16)
+          radius: Style.cornerRadius
+          color: Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.08)
+
+          Text {
+            id: setupText
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.space(8)
+            text: root.depsSummary
+            color: root.fg
+            font.family: root.ff
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
+
         PanelSeparator {
           foreground: root.fg
         }
@@ -320,6 +381,7 @@ Panel {
         Column {
           width: parent.width
           spacing: Style.space(4)
+          visible: !root.depsChecked || root.depsReady
 
           Text {
             width: parent.width
@@ -350,6 +412,9 @@ Panel {
             width: (parent.width - parent.spacing) / 2
             text: root.speaking ? "Stop" : "Read aloud"
             active: root.speaking
+            // Button has no built-in disabled styling, so dim it as well.
+            enabled: !root.depsChecked || root.depsReady
+            opacity: enabled ? 1 : 0.45
             foreground: root.fg
             fontFamily: root.ff
             horizontalPadding: Style.spacing.controlPaddingX
@@ -360,13 +425,16 @@ Panel {
 
           Button {
             width: (parent.width - parent.spacing) / 2
-            text: "Settings…"
+            text: root.depsChecked && !root.depsReady ? "Diagnose…" : "Settings…"
             foreground: root.fg
             fontFamily: root.ff
             horizontalPadding: Style.spacing.controlPaddingX
             verticalPadding: Style.spacing.controlPaddingY
             bordered: true
-            onClicked: Quickshell.execDetached(["omarchy-launch-terminal", "ttsctl"])
+            onClicked: Quickshell.execDetached([
+              "omarchy-launch-terminal",
+              root.depsChecked && !root.depsReady ? "ttsctl doctor" : "ttsctl"
+            ])
           }
         }
       }

@@ -6,7 +6,8 @@
 text aloud on Wayland/Hyprland: press `ALT+S` (or click the TTS bar icon) →
 `wl-paste` grabs the selection → `edge-tts` (or `espeak-ng` fallback) synthesizes
 → `mpv` plays; second press stops. A Quickshell popup shows live status and
-settings. Toggle/speaking state lives in `/tmp/readitloud-tts.pid` and
+settings. Toggle/speaking state lives in `~/.local/state/readitloud/` (mode 0700;
+PID file, synthesized audio, mpv IPC socket, 0600 temp text file) and
 `/tmp/speaking-status` (`1` while speaking) is a status hook for external bars.
 
 This repo is now primarily the **plugin source** plus this file and `README.md`.
@@ -74,9 +75,18 @@ The plugin is developed and run live on this Omarchy machine at
 - `StdioCollector` has a `read` signal (`onRead`), **not** `onDataRead`; use
   `waitForEnd: true` + read `.text` in `onExited` (pomodoro/omanews pattern).
 - Never read/write `/usr/share/omarchy/` (read-only, overwritten on update).
-- Install dependencies with `omarchy pkg add <pkgs>` (or `omarchy pkg aur add`),
-  not `sudo pacman -S` in scripts. `edge-tts` runs from a venv at
-  `~/.local/share/tts-venv` because the AUR `python-edge-tts` package is
-  abandoned (needs a dozen python deps in a bare `sudo` install).
+- **The plugin never installs anything** — no `sudo`, no `pkexec`, no package
+  manager invocation, not even a prompt. `speak.sh check` / `ttsctl doctor`
+  only *report* missing deps and print the install command as a hint string.
+  This is a marketplace submission requirement (`manual-setup`); keep it that
+  way when editing dependency docs or install instructions. Installing your own
+  deps locally is fine (`omarchy pkg add <pkgs>`), just don't add it to code.
+- `edge-tts` runs from a venv at `~/.local/share/tts-venv` because the AUR
+  `python-edge-tts` package is abandoned (needs a dozen python deps in a bare
+  `sudo` install).
+- Both engines play through **mpv** (not `aplay`), so the progress bar works
+  offline; espeak settings are translated to its wpm/pitch/amplitude scales.
 - No tests, linter, build step, or CI. Individual run: `speak.sh` and `ttsctl`
-  from the plugin dir.
+  from the plugin dir. `omarchy plugin validate .` gates manifest changes;
+  `bash -n` gates the scripts; clear `rm -rf ~/.cache/quickshell/qmlcache/*`
+  after Panel.qml edits.
