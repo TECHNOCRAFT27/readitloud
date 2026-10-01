@@ -10,12 +10,16 @@
 # fallback), plays through mpv. Toggle state tracked in a PID file.
 set -o pipefail
 
-PIDFILE="/tmp/readitloud-tts.pid"
-AUDIO_MP3="/tmp/readitloud-tts.mp3"
-AUDIO_WAV="/tmp/readitloud-tts.wav"
+STATE_DIR="${HOME}/.local/state/readitloud"
+PIDFILE="${STATE_DIR}/tts.pid"
+AUDIO_MP3="${STATE_DIR}/tts.mp3"
+AUDIO_WAV="${STATE_DIR}/tts.wav"
+MPV_SOCK="${STATE_DIR}/tts.sock"
+# NOTE: this path is read by external bar scripts, so it stays in /tmp.
 WAYBAR_FILE="/tmp/speaking-status"
-MPV_SOCK="/tmp/readitloud-tts.sock"
 EDGE_TTS_BIN="${HOME}/.local/share/tts-venv/bin/edge-tts"
+
+mkdir -p "$STATE_DIR" && chmod 0700 "$STATE_DIR" 2>/dev/null
 
 # Defaults
 VOICE="en-IN-NeerjaExpressiveNeural"
@@ -39,7 +43,29 @@ while [[ $# -gt 0 ]]; do
 done
 
 is_speaking() {
-  [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+  [[ -f "$PIDFILE" ]] || return 1
+  local pid
+  pid=$(cat "$PIDFILE" 2>/dev/null) || return 1
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+# Only signal the PID if its cmdline matches our own playback/synthesis commands.
+# Guards against a stale or tampered PID file pointing at an unrelated process.
+pid_is_ours() {
+  local pid="$1" cmdline
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  [[ -r "/proc/$pid/cmdline" ]] || return 1
+  cmdline=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null)
+  [[ "$cmdline" == *"readitloud"* || "$cmdline" == *"speak.sh"* || "$cmdline" == *"mpv"* || "$cmdline" == *"aplay"* || "$cmdline" == *"edge-tts"* || "$cmdline" == *"espeak-ng"* ]]
+}
+
+stop_pid() {
+  local pid
+  pid=$(cat "$PIDFILE" 2>/dev/null)
+  if [[ -n "$pid" ]] && pid_is_ours "$pid"; then
+    kill "$pid" 2>/dev/null
+  fi
 }
 
 # notify-send can block when the notification daemon is busy/unreachable;
@@ -49,7 +75,7 @@ notify() {
 }
 
 cleanup() {
-  rm -f "$PIDFILE" "$AUDIO_MP3" "$AUDIO_WAV" "$WAYBAR_FILE" "$MPV_SOCK"
+  rm -f "$PIDFILE" "$AUDIO_MP3" "$AUDIO_WAV" "$WAYBAR_FILE" "$MPV_SOCK" "${STATE_DIR}"/text.* 2>/dev/null
 }
 
 case "$cmd" in
@@ -63,8 +89,8 @@ case "$cmd" in
     ;;
 
   stop)
-    kill "$(cat "$PIDFILE")" 2>/dev/null
-    pkill -f "mpv.*readitloud-tts" 2>/dev/null
+    stop_pid
+    pkill -f "mpv.*${STATE_DIR}/tts.mp3" 2>/dev/null
     pkill -f "[s]peak.sh start" 2>/dev/null
     pkill -f "tts-venv/bin/edge-tts" 2>/dev/null
     if is_speaking; then
@@ -77,8 +103,8 @@ case "$cmd" in
   start)
     # If already speaking, stop first (toggle behavior)
     if is_speaking; then
-      kill "$(cat "$PIDFILE")" 2>/dev/null
-      pkill -f "mpv.*readitloud-tts" 2>/dev/null
+      stop_pid
+      pkill -f "mpv.*${STATE_DIR}/tts.mp3" 2>/dev/null
       cleanup
       notify "🔇 Stopped" "Text-to-speech stopped"
       exit 0
@@ -94,14 +120,18 @@ case "$cmd" in
     notify "🔊 Speaking" "Reading selected text..."
 
     if [[ "$ENGINE" == "edge-tts" ]] && [[ -x "$EDGE_TTS_BIN" ]]; then
-      "$EDGE_TTS_BIN" -v "$VOICE" -t "$TEXT" \
+      rm -f "$MPV_SOCK"
+      TEXTFILE=$(mktemp "${STATE_DIR}/text.XXXXXX") || exit 1
+      chmod 0600 "$TEXTFILE"
+      printf '%s' "$TEXT" > "$TEXTFILE"
+      "$EDGE_TTS_BIN" -v "$VOICE" -f "$TEXTFILE" \
         --rate "$RATE" --pitch "$PITCH" --volume "$VOLUME" \
         --write-media "$AUDIO_MP3" >/dev/null 2>&1
-      rm -f "$MPV_SOCK"
+      rm -f "$TEXTFILE"
       mpv "$AUDIO_MP3" --no-video --really-quiet \
         --input-ipc-server="$MPV_SOCK" &
     else
-      espeak-ng -v en-us -p 75 -s 110 -w "$AUDIO_WAV" "$TEXT" 2>/dev/null
+      printf '%s' "$TEXT" | espeak-ng -v en-us -p 75 -s 110 --stdin -w "$AUDIO_WAV" 2>/dev/null
       aplay "$AUDIO_WAV" >/dev/null 2>&1 &
     fi
 
